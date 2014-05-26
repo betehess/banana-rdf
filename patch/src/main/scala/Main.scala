@@ -13,10 +13,16 @@ class LDPatchExample[Rdf <: RDF](implicit ops: RDFOps[Rdf]) {
 
   def main(args: Array[String]): Unit = {
 
-    val parser = new grammar.LDPatchParser
+    val baseURI = URI("http://example.com/base#")
 
-    def parsePrologue(s: String) = parser.parse(parser.prologue, new StringReader(s))
-    def parse(s: String) = parser.parse(parser.ldpatch, new StringReader(s))
+    def parsePrologue(s: String) = {
+      val parser = new grammar.LDPatchParser(baseURI)
+      parser.parse(parser.prologue, new StringReader(s))
+    }
+    def parse(s: String) = {
+      val parser = new grammar.LDPatchParser(baseURI)
+      parser.parse(parser.ldpatch, new StringReader(s))
+    }
 
     println(parsePrologue("""
 Prefix foaf: <http://xmlns.com/foaf/>

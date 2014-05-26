@@ -32,11 +32,11 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
     import scala.util.parsing.combinator._
     import java.io._
   
-    val uri = """[a-zA-Z0-9:/#_\.\-\+]+""".r
-    val integer = """[0-9]+""".r
+    val uri = """[^\u0000-\u0020<>"{}|^`\\]*""".r
+    val INTEGER = """[0-9]+""".r
     val name = """[a-zA-Z][a-zA-Z0-9_-]*|[a-zA-Z_][a-zA-Z0-9_]+""".r
 
-    class LDPatchParser(var base: Option[Rdf#URI] = None, var prefixes: Map[String, Rdf#URI] = Map.empty)
+    class LDPatchParser(baseURI: Rdf#URI, var prefixes: Map[String, Rdf#URI] = Map.empty)
     extends RegexParsers with JavaTokenParsers with PackratParsers {
 
       def ldpatch: Parser[List[Statement[Rdf]]] =
@@ -71,10 +71,23 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
 
       def delete: Parser[Delete[Rdf]] = ???
 
+      def iri: Parser[Rdf#URI] = ( IRIREF | PrefixNamed )
 
+      def IRIREF: Parser[Rdf#URI] =
+        "<" ~ uri ~ ">" ^^ { case "<" ~ uri ~ ">" => baseURI.resolve(URI(uri)) }
 
+      def PrefixNamed: Parser[Rdf#URI] = (
+          PNAME_LN ^^ { case (prefix, localName) => URI(prefix + localName) }
+        | PNAME_NS ^^ { case prefix => URI(prefix) }
+      )
 
-      def iri: Parser[Rdf#URI] = uri ^^ { URI(_) }
+      def PNAME_NS: Parser[String] = PN_PREFIX.? ~ ':' ^^ {
+        case prefixOpt ~ ':' => prefixOpt.getOrElse(baseURI.getString)
+      }
+
+      def PNAME_LN: Parser[(String, String)] = PNAME_NS ~ PN_LOCAL ^^ {
+        case prefix ~ localName => (prefix, localName)
+      }
 
       def bnode: Parser[Rdf#BNode] = (
           "_:" ~ name ^^ { case "_:" ~ name => BNode(name) }
@@ -86,15 +99,12 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
             case lit ~ Some("^^" ~ dt) => Literal(lit.substring(1, lit.size - 1), dt)
             case lit ~ None            => Literal(lit.substring(1, lit.size - 1), xsd.string)
           }
-        | integer ^^ { i => Literal(i, xsd.integer) }
+        | INTEGER ^^ { i => Literal(i, xsd.integer) }
       )
 
       def qnameORuri: Parser[Rdf#URI] = (
           "<" ~ uri ~ ">" ^^ {
-            case "<" ~ uri ~ ">" => base match {
-              case Some(b) => b.resolve(URI(uri))
-              case None    => URI(uri)
-            }
+            case "<" ~ uri ~ ">" => baseURI.resolve(URI(uri))
           }
         | name ~ ":" ~ name ^^ {
           case prefix ~ ":" ~ localName => prefixes.get(prefix) match {
@@ -105,6 +115,33 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
       )
 
       def varr: Parser[Var] = "?" ~ ident ^^ { case "?" ~ x => Var(x) }
+
+      def asChar(r: scala.util.matching.Regex): Parser[Char] = acceptIf(c => r.findFirstIn(c.toString).isDefined)(c => s"'$c' was not matched by {$r}")
+
+      def asChar(r: String): Parser[Char] = asChar(r.r)
+
+      lazy val PN_CHARS_BASE: Parser[Char] = asChar("""[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]""") // \u10000-\uEFFFF
+      lazy val PN_CHARS_U: Parser[Char] = ( PN_CHARS_BASE | accept('_') )
+      lazy val PN_CHARS: Parser[Char] = ( PN_CHARS_U | asChar("""[-0-9\u00B7\u0300-\u036F\u203F-\u2040]""") )
+      lazy val PN_PREFIX: Parser[String] = PN_CHARS_BASE ~ ((PN_CHARS | accept('.')).* ~ PN_CHARS ).? ^^ {
+        case firstChar ~ charsOpt =>
+          val sb = new StringBuffer
+          sb.append(firstChar)
+          charsOpt.foreach { case chars ~ lastChar =>
+            chars.foreach(char => sb.append(char))
+            sb.append(lastChar)
+          }
+          sb.toString()
+      }
+
+
+
+      lazy val PN_LOCAL: Parser[String] = ???
+//        (PN_CHARS_U | asChar("[:0-9]".r) | PLX) ~ ((PN_CHARS | asChar("[.:]") | PLX).* ~ (PN_CHARS | ':' | PLX)).?
+      lazy val PLX: Parser[String] = PERCENT | PN_LOCAL_ESC
+      lazy val PERCENT: Parser[String] = '%' ~ HEX ~ HEX ^^ { case '%' ~ h1 ~ h2 => s"%$h1$h2" }
+      lazy val HEX: Parser[Char] = asChar("[0-9A-Fa-f]")
+      lazy val PN_LOCAL_ESC: Parser[String] = "\\[_~.\\-!$&\'()*+,;=/?#@%]".r
 
     }
 
