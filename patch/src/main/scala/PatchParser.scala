@@ -116,16 +116,16 @@ class PatchParserCombinator[Rdf <: RDF](
   def qnameORuri: Parser[Rdf#URI] = (
       "<" ~ uri ~ ">" ^^ {
         case "<" ~ uri ~ ">" => base match {
-          case Some(b) => URI(uri).resolveAgainst(URI(b))
+          case Some(b) => ???//URI(uri).resolveAgainst(URI(b))
           case None    => URI(uri)
         }
       }
-    | name ~ ":" ~ name ^^ {
-      case prefix ~ ":" ~ localName => prefixes.get(prefix) match {
-        case Some(uri) => URI(uri + localName)
-        case None      => sys.error(s"unknown prefix ${prefix}")
-      }
-    }
+//    | name ~ ":" ~ name ^^ {
+//      case prefix ~ ":" ~ localName => prefixes.get(prefix) match {
+//        case Some(uri) => URI(uri + localName)
+//        case None      => sys.error(s"unknown prefix ${prefix}")
+//      }
+//    }
   )
 
   def bnode: Parser[Rdf#BNode] = (
@@ -135,10 +135,10 @@ class PatchParserCombinator[Rdf <: RDF](
 
   def literal: Parser[Rdf#Literal] = (
       stringLiteral ~ opt("^^" ~ qnameORuri) ^^ {
-        case lit ~ Some("^^" ~ dt) => TypedLiteral(lit.substring(1, lit.size - 1), dt)
-        case lit ~ None            => TypedLiteral(lit.substring(1, lit.size - 1), xsd.string)
+        case lit ~ Some("^^" ~ dt) => Literal(lit.substring(1, lit.size - 1), dt)
+        case lit ~ None            => Literal(lit.substring(1, lit.size - 1), xsd.string)
       }
-    | integer ^^ { i => TypedLiteral(i, xsd.integer) }
+    | integer ^^ { i => Literal(i, xsd.integer) }
   )
 
   def varr: Parser[Var[Rdf]] = "?" ~ ident ^^ { case "?" ~ x => Var(x) }
