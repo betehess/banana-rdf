@@ -2,6 +2,7 @@ package org.w3.banana.ldpatch
 
 import org.w3.banana._
 import scala.util.Try
+import scala.language.reflectiveCalls
 
 sealed trait Statement[Rdf <: RDF]
 
@@ -263,6 +264,90 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
       def HEX: Parser[Char] = oneOf("[0-9A-Fa-f]")
       def PN_LOCAL_ESC: Parser[String] = "\\[_~.\\-!$&\'()*+,;=/?#@%]".r
 
+    }
+
+
+
+
+
+
+    import org.parboiled2._
+    import CharPredicate.HexDigit
+
+    class PEGPatchParser(val input: ParserInput, baseURI: Rdf#URI, var prefixes: Map[String, Rdf#URI] = Map.empty) extends Parser with StringBuilding {
+
+      // LDPatch ::= Prologue Statement*
+      def LDPatch: Rule1[Seq[Statement[Rdf]]] = rule {
+        Prologue ~> (prefixes => this.prefixes = prefixes) ~ zeroOrMore(Statement)
+      }
+
+      // Statement ::= Add | ...
+      def Statement: Rule1[Statement[Rdf]] = ??? //rule { add }
+  
+      def WS: Rule0 = rule { oneOrMore(anyOf(" \t\r\n")) }
+  
+      // Prologue ::= Prefix*
+      def Prologue: Rule1[Map[String, Rdf#URI]] = rule { push(this.prefixes) ~ zeroOrMore(Prefix ~> ((prefixes: Map[String, Rdf#URI], prefix) => push(prefixes + prefix))) }
+  
+      // Prefix ::= "Prefix" PNAME_NS IRIREF
+      def Prefix: Rule1[(String, Rdf#URI)] = rule {
+        "Prefix" ~ WS ~ PNAME_NS ~ WS ~ IRIREF ~> ((qname: String, iri: Rdf#URI) => (qname, iri))
+      }
+  
+      // PNAME_NS ::= PN_PREFIX? ':'
+      def PNAME_NS: Rule1[String] = rule {
+        optional(PN_PREFIX) ~ ':' ~> ((prefixOpt: Option[String]) => push(prefixOpt.getOrElse("")))
+      }
+  
+      // IRIREF ::= '<' ([^#x00-#x20<>"{}|^`\] | UCHAR)* '>' /* #x00=NULL #01-#x1F=control codes #x20=space */
+      def IRIREF: Rule1[Rdf#URI] = rule {
+        '<' ~ clearSB() ~ zeroOrMore(IRIREF_CHAR) ~ '>' ~ push(URI(sb.toString()))
+      }
+  
+      // matches a Char in [^#x00-#x20<>"{}|^`\] or /uxxxx or /Uxxxxxxxx, and pushes it on the StringBuffer
+      def IRIREF_CHAR: Rule0 = rule (
+          UCHAR
+        | (CharPredicate('\u0000' to '\u0020') ++ CharPredicate("<>\"{}|^`\\")).negated ~ appendSB()
+      )
+  
+      // UCHAR ::= '\\u' HEX HEX HEX HEX | '\\U' HEX HEX HEX HEX HEX HEX HEX HEX
+      def UCHAR: Rule0 = rule {
+        "\\u" ~ capture(HexDigit ~ HexDigit ~ HexDigit ~ HexDigit) ~> ((code: String) => appendSB(java.lang.Integer.parseInt(code, 16).asInstanceOf[Char]))
+      }
+  
+      // PN_PREFIX ::= PN_CHARS_BASE ((PN_CHARS | '.')* PN_CHARS)?
+      def PN_PREFIX: Rule1[String] = rule {
+        clearSB() ~ PN_CHARS_BASE ~ optional(PN_PREFIX2) ~ push(sb.toString())
+      }
+  
+      // (PN_CHARS | '.')* PN_CHARS
+      // so basically PN_CHARS+ with no trailing '.'
+      def PN_PREFIX2: Rule0 = rule {
+  //      capture(oneOrMore(PN_CHARS)) ~> ((s: String) => test(s.charAt(s.length-1) != '.') ~ appendSB(s))
+        oneOrMore(PN_CHARS) ~ test(lastChar != '.')
+      }
+  
+      def between(low: Char, high: Char): CharPredicate = CharPredicate.from(c => c >= low && c <= high)
+  
+      // PN_CHARS_BASE ::= [A-Z] | [a-z] | [#x00C0-#x00D6] | [#x00D8-#x00F6] | [#x00F8-#x02FF] | [#x0370-#x037D] | [#x037F-#x1FFF] | [#x200C-#x200D] | [#x2070-#x218F] | [#x2C00-#x2FEF] | [#x3001-#xD7FF] | [#xF900-#xFDCF] | [#xFDF0-#xFFFD] | [#x10000-#xEFFFF]
+      def PN_CHARS_BASE: Rule0 = rule (
+          CharPredicate.Alpha ~ appendSB()
+        | (between('\u00C0', '\u00D6') ++ between('\u00D8', '\u00F6') ++ between('\u00F8', '\u02FF') ++ between('\u0370', '\u037D') ++ between('\u037F', '\u1FFF') ++ between('\u200C', '\u200D') ++ between('\u2070', '\u218F') ++ between('\u2C00', '\u2FEF') ++ between('\u3001', '\uD7FF') ++ between('\uF900', '\uFDCF') ++ between('\uFDF0', '\uFFFD')) ~ appendSB()
+      )
+  
+      // PN_CHARS ::= PN_CHARS_U | '-' | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040]
+      def PN_CHARS: Rule0 = rule (
+          PN_CHARS_U
+        | (CharPredicate('-') ++ CharPredicate.Digit ++ CharPredicate('\u00B7') ++ between('\u0300', '\u036F') ++ between('\u203F', '\u2040')) ~ appendSB()
+      )
+  
+      // PN_CHARS_U ::= PN_CHARS_BASE | '_'
+      def PN_CHARS_U: Rule0 = rule (
+          PN_CHARS_BASE
+        | '_' ~ appendSB()
+      )
+  
+  
     }
 
   }
