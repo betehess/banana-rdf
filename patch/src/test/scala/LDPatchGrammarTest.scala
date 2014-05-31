@@ -85,7 +85,16 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
         PatchLiteral(Literal("Alexandre Bertails"))
       )
     )
+  }
 
+  "parse Delete" in {
+    newParser("""Delete ?betehess foaf:name "Alexandre Bertails" .""").delete.run().success.value should be(
+      Delete(
+        Var("betehess"),
+        PatchIRI(URI("http://xmlns.com/foaf/name")),
+        PatchLiteral(Literal("Alexandre Bertails"))
+      )
+    )
   }
 
 }

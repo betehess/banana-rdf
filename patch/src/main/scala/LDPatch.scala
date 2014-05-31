@@ -10,6 +10,7 @@ case class Add[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) 
 //    case class AddList(s: Subject, p: Predicate, list: Listt) extends Statement
 case class Delete[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) extends Statement[Rdf]
 //    case class Replace(s: Subject, p: Predicate, slice: Slice, list: Listt) extends Statement
+//case class Bind[Rdf <: RDF]()
 
 sealed trait Subject[+Rdf <: RDF]
 sealed trait Predicate[Rdf <: RDF]
@@ -41,14 +42,19 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
       }
 
       // Statement ::= Bind | Add | Delete | Replace | Prefix | Comment
-      def Statement: Rule1[Statement[Rdf]] = rule {
-        add //Bind | Add | Delete | Replace | Prefix
-      }
+      def Statement: Rule1[Statement[Rdf]] = rule (
+        add | delete //Bind | Add | Delete | Replace | Prefix
+      )
   
       // Add ::= "Add" Subject Predicate Object '.'
-      def add: Rule1[Add[Rdf]] = rule {
+      def add: Rule1[Add[Rdf]] = rule (
         "Add" ~ WS1 ~ SubjectR ~ WS1 ~ PredicateR ~ WS1 ~ ObjectR ~ WS0 ~ '.' ~> ((s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) => Add(s, p, o))
-      }
+      )
+
+      // Delete ::= "Delete" Subject Predicate Object '.'
+      def delete: Rule1[Delete[Rdf]] = rule (
+        "Delete" ~ WS1 ~ SubjectR ~ WS1 ~ PredicateR ~ WS1 ~ ObjectR ~ WS0 ~ '.' ~> ((s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) => Delete(s, p, o))
+      )
 
       // Subject ::= iri | BlankNode | Var
       def SubjectR: Rule1[Subject[Rdf]] = rule (
