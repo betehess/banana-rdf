@@ -12,7 +12,7 @@ case class Delete[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf
 //    case class Replace(s: Subject, p: Predicate, slice: Slice, list: Listt) extends Statement
 
 sealed trait Subject[+Rdf <: RDF]
-sealed trait Predicate[+Rdf <: RDF]
+sealed trait Predicate[Rdf <: RDF]
 sealed trait Objectt[+Rdf <: RDF]
 
 case class PatchIRI[Rdf <: RDF](uri: Rdf#URI) extends Subject[Rdf] with Predicate[Rdf] with Objectt[Rdf]
@@ -24,274 +24,246 @@ object LDPatch {
   def apply[Rdf <: RDF](implicit ops: RDFOps[Rdf]): LDPatch[Rdf] = new LDPatch[Rdf]
 }
 
-object RicherParserChar {
-  import scala.util.parsing.combinator.Parsers
-  implicit class RicherParserChar(p: Parsers#Parser[Char]) {
-    def ps: Parsers#Parser[String] = p.map(_.toString)
-  }
-}
-
-//object RicherParserString {
-//  import scala.util.parsing.combinator.Parsers
-//  implicit class RicherParserString(p: Parsers#Parser[Char]) {
-//    def ps: Parsers#Parser[String] = p.map(_.toString)
-//  }
-//}
-
 class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
 
   import ops._
 
   object grammar {
 
-    import scala.util.parsing.combinator._
-    import java.io._
-  
-    val INTEGER = "[+-]?[0-9]+".r
-    val DECIMAL = "[+-]?[0-9]*\\.[0-9]+".r
-    val DOUBLE = "[+-]?([0-9]+\\.[0-9]*[eE][+-]?[0-9]+|\\.[0-9]+[eE][+-]?[0-9]+|[0-9]+[eE][+-]?[0-9]+"
-    val	EXPONENT = "[eE][+-]?[0-9]+".r
-    val uri = """[^<>"{}|^`\\]*""".r // """[^\u0000-\u0020<>"{}|^`\\]*""".r
-    val name = """[a-zA-Z][a-zA-Z0-9_-]*|[a-zA-Z_][a-zA-Z0-9_]+""".r
-
-    class LDPatchParser(baseURI: Rdf#URI, var prefixes: Map[String, Rdf#URI] = Map.empty)
-    extends RegexParsers with /*syntactical.StdTokenParsers  with*/ JavaTokenParsers /*with PackratParsers*/ {
-
-      class Wrap[+T](name:String,parser:Parser[T]) extends Parser[T] {
-        def apply(in: Input): ParseResult[T] = {
-          val first = in.first
-          val pos = in.pos
-          val offset = in.offset
-          val t = parser.apply(in)
-          println(s"$name.apply for token {$first} at position $pos offset $offset returns $t")
-          t
-        }
-      }
-
-      implicit def toWrapped(name:String) = new {
-        def !!![T](p:Parser[T]) = new Wrap(name,p)
-      }
-
-      def ldpatch: Parser[List[Statement[Rdf]]] =
-        prologue ~ rep(statement) ^^ { case prefixes ~ statements => statements }
-
-      def statement: Parser[Statement[Rdf]] = (add/* | delete*/) 
-
-      def prologue: Parser[Unit] = rep(prefix) ^^^ ()
-
-      val WS = "[ \t\r\n]*".r
-
-      def prefix: Parser[Unit] = "prefix" !!! {
-        "Prefix" ~> WS ~> PNAME_NS ~ IRIREF <~ WS <~ "." ^^ { case qname ~ uri => this.prefixes += (qname -> uri) }
-      }
-      def add: Parser[Add[Rdf]] =
-        "Add" ~ subject ~ predicate ~ objectt ^^ { case "Add" ~ s ~ p ~ o => Add(s, p, o) }
-
-      def subject: Parser[Subject[Rdf]] = (
-          iri ^^ { PatchIRI(_) }
-        | bnode ^^ { PatchBNode(_) }
-        | varr
-      )
-
-      def predicate: Parser[Predicate[Rdf]] =
-        iri ^^ { PatchIRI(_) }
-
-      def objectt: Parser[Objectt[Rdf]] = (
-          iri ^^ { PatchIRI(_) }
-        | bnode ^^ { PatchBNode(_) }
-        | literal ^^ { PatchLiteral(_) }
-        | varr
-      )
-
-
-      def delete: Parser[Delete[Rdf]] = ???
-
-      def iri: Parser[Rdf#URI] = ( IRIREF | PrefixedName )
-
-      def IRIREF: Parser[Rdf#URI] =
-        "<" ~ uri ~ ">" ^^ { case "<" ~ uri ~ ">" => println("$$$$ "+uri); baseURI.resolve(URI(uri)) }
-
-      def PrefixedName: Parser[Rdf#URI] = (
-          PNAME_LN ^^ { case (prefix, localName) => URI(prefixes(prefix).getString + localName) }
-        | PNAME_NS ^^ { case prefix => URI(prefix) }
-      )
-
-      def PNAME_NS: Parser[String] = "PNAME_NS" !!! { PN_PREFIX.? ~ ":" ^^ {
-        case prefixOpt ~ ":" => prefixOpt.getOrElse(baseURI.getString)
-      }
-      }
-      def PNAME_LN: Parser[(String, String)] = PNAME_NS ~ PN_LOCAL ^^ {
-        case prefix ~ localName => (prefix, localName)
-      }
-
-      def bnode: Parser[Rdf#BNode] = (
-          "_:" ~ name ^^ { case "_:" ~ name => BNode(name) }
-        | "[]" ^^ { _ => BNode() }
-      )
-
-      def literal: Parser[Rdf#Literal] = RDFLiteral | NumericLiteral | BooleanLiteral
-
-      def NumericLiteral: Parser[Rdf#Literal] = (
-          INTEGER ^^ { lexicalForm => Literal(lexicalForm, xsd.integer) }
-        | DECIMAL ^^ { lexicalForm => Literal(lexicalForm, xsd.decimal) }
-        | DOUBLE ^^ { lexicalForm => Literal(lexicalForm, xsd.double) }
-      )
-
-      def BooleanLiteral: Parser[Rdf#Literal] = (
-          "true" ^^^ xsd.`true`
-        | "false" ^^^ xsd.`false`
-      )
-
-      // RDFLiteral 	::= 	String (LANGTAG | '^^' iri)?
-      def RDFLiteral: Parser[Rdf#Literal] = TypedLiteral | LangLiteral
-
-      def TypedLiteral: Parser[Rdf#Literal] = STRING ~ ("^^" ~ iri).? ^^ {
-        case lexicalForm ~ None             => Literal(lexicalForm)
-        case lexicalForm ~ Some("^^" ~ uri) => Literal(lexicalForm, uri)
-      }
-
-      def LangLiteral: Parser[Rdf#Literal] = STRING ~ LANGTAG ^^ {
-        case lexicalForm ~ langtag => Literal.tagged(lexicalForm, Lang(langtag))
-      }
-
-      def LANGTAG: Parser[String] = "@[a-zA-Z]+(-[a-zA-Z0-9]+)*".r ^^ { _.substring(1) }
-
-      def STRING: Parser[String] = ( STRING_LITERAL_QUOTE | STRING_LITERAL_SINGLE_QUOTE | STRING_LITERAL_LONG_SINGLE_QUOTE | STRING_LITERAL_LONG_QUOTE )
-
-      def makeString(chars: Iterable[Char]): String = {
-        val sb = new StringBuffer
-        chars.foreach(c => sb.append(c))
-        sb.toString()
-      }
-
-      def STRING_LITERAL_QUOTE: Parser[String] = "\"" ~ (oneOf("[^\"\\\n\r]") | ECHAR | UCHAR).* ~ "\"" ^^ { /* #x22=" #x5C=\ #xA=new line #xD=carriage return */
-        case "\"" ~ chars ~ "\"" => chars.mkString
-      }
-      def STRING_LITERAL_SINGLE_QUOTE: Parser[String] = "'" ~ (oneOf("[^'\\\n\r]") | ECHAR | UCHAR).* ~ "'" ^^ { /* #x27=' #x5C=\ #xA=new line #xD=carriage return */
-        case "'" ~ chars ~ "'" => chars.mkString
-      }
-      def STRING_LITERAL_LONG_SINGLE_QUOTE: Parser[String] = "'''" ~ (("'" | "''").? ~ (oneOf("[^'\\]") | ECHAR | UCHAR)).* ~ "'''" ^^ {
-        case "'''" ~ chars ~ "'''" =>
-          val sb = new StringBuffer
-          chars.foreach { case quotesOpt ~ chars =>
-            quotesOpt.foreach(c => sb.append(c))
-            sb.append(chars.toString)
-          }
-          sb.toString
-      }
-      def STRING_LITERAL_LONG_QUOTE: Parser[String] = "\"\"\"" ~ (("\"\"?").? ~ (oneOf("[^\"\\]") | ECHAR | UCHAR)).* ~ "\"\"\"" ^^ {
-        case "\"\"\"" ~ chars ~ "\"\"\"" =>
-          val sb = new StringBuffer
-          chars.foreach { case quotesOpt ~ chars =>
-            quotesOpt.foreach(c => sb.append(c))
-            sb.append(chars.toString)
-          }
-          sb.toString
-      }
-      
-      def UCHAR: Parser[Char] = "\\u" ~ "[0-9A-Fa-f]{4}".r /*| '\U' HEX HEX HEX HEX HEX HEX HEX HEX*/ ^^ {
-        case "\\u" ~ code => java.lang.Integer.parseInt(code, 16).asInstanceOf[Char]
-      }
-      def ECHAR: Parser[Char] = "\\[tbnrf\"'\\]".r ^^ {
-        case "\\t" => '\t'
-        case "\\b" => '\b'
-        case "\\n" => '\n'
-        case "\\r" => '\r'
-        case "\\f" => '\f'
-        case "\\\"" => '\"'
-        case "\\'" => '\''
-        case "\\\\" => '\\'
-      }
-
-      def qnameORuri: Parser[Rdf#URI] = (
-          "<" ~ uri ~ ">" ^^ {
-            case "<" ~ uri ~ ">" => baseURI.resolve(URI(uri))
-          }
-        | name ~ ":" ~ name ^^ {
-          case prefix ~ ":" ~ localName => prefixes.get(prefix) match {
-            case Some(uri) => URI(uri + localName)
-            case None      => sys.error(s"unknown prefix ${prefix}")
-          }
-        }
-      )
-
-      def varr: Parser[Var] = "?" ~ ident ^^ { case "?" ~ x => Var(x) }
-
-      def asChar(r: scala.util.matching.Regex): Parser[Char] = acceptIf(c => r.findFirstIn(c.toString).isDefined)(c => s"'$c' was not matched by {$r}")
-
-      def oneOf(chars: String): Parser[Char] = asChar(chars.r)
-
-      val PN_CHARS_BASE: Parser[Char] = oneOf("""[A-Za-z\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u02FF\u0370-\u037D\u037F-\u1FFF\u200C-\u200D\u2070-\u218F\u2C00-\u2FEF\u3001-\uD7FF\uF900-\uFDCF\uFDF0-\uFFFD]""") // \u10000-\uEFFFF
-      def PN_CHARS_U: Parser[Char] = ( PN_CHARS_BASE | accept('_') )
-      def PN_CHARS: Parser[Char] = ( PN_CHARS_U | oneOf("""[-0-9\u00B7\u0300-\u036F\u203F-\u2040]""") )
-      def PN_PREFIX: Parser[String] = "PN_PREFIX" !!! {PN_CHARS_BASE ~ PN_PREFIX_AUX.? ^^ {
-        case firstChar ~ charsOpt =>
-          val sb = new StringBuffer
-          sb.append(firstChar)
-          charsOpt.foreach { chars => sb.append(chars) }
-          sb.toString()
-      }}
-      def PN_PREFIX_AUX: Parser[String] = "PN_PREFIX_AUX" !!! {(PN_CHARS | accept('.')).+ ^^ {
-        case chars =>
-          val sb = new StringBuffer
-          chars.foreach(char => sb.append(char))
-          sb.toString()
-      } filter (s => s.charAt(s.length-1) != '.')
-      }
-
-      def PN_LOCAL: Parser[String] = (PN_CHARS_U | oneOf("[:0-9]") | PLX) ~ PN_LOCAL_AUX.? ^^ {
-        case first ~ restOpt =>
-          val sb = new StringBuffer
-          first match {
-            case char: Char => sb.append(char)
-            case chars: String => sb.append(chars)
-          }
-          restOpt.foreach { chars => sb.append(chars) }
-          sb.toString
-      }
-      def PN_LOCAL_AUX: Parser[String] = (PN_CHARS | accept(':') | PLX).+ ^^ {
-        case chars =>
-          val sb = new StringBuffer
-          chars.foreach {
-            case char: Char => sb.append(char)
-            case chars: String => sb.append(chars)
-          }
-          sb.toString()
-      } filter (s => s.charAt(s.length-1) != '.')
-
-      def PLX: Parser[String] = PERCENT | PN_LOCAL_ESC
-      def PERCENT: Parser[String] = '%' ~ HEX ~ HEX ^^ { case '%' ~ h1 ~ h2 => s"%$h1$h2" }
-      def HEX: Parser[Char] = oneOf("[0-9A-Fa-f]")
-      def PN_LOCAL_ESC: Parser[String] = "\\[_~.\\-!$&\'()*+,;=/?#@%]".r
-
-    }
-
-
-
-
-
-
     import org.parboiled2._
-    import CharPredicate.HexDigit
+    import CharPredicate._
 
     class PEGPatchParser(val input: ParserInput, baseURI: Rdf#URI, var prefixes: Map[String, Rdf#URI] = Map.empty) extends Parser with StringBuilding {
 
       // LDPatch ::= Prologue Statement*
       def LDPatch: Rule1[Seq[Statement[Rdf]]] = rule {
-        Prologue ~> (prefixes => this.prefixes = prefixes) ~ zeroOrMore(Statement)
+        Prologue ~> (prefixes => this.prefixes = prefixes) ~ zeroOrMore(Statement) ~ EOI
       }
 
-      // Statement ::= Add | ...
-      def Statement: Rule1[Statement[Rdf]] = ??? //rule { add }
+      // Statement ::= Bind | Add | Delete | Replace | Prefix | Comment
+      def Statement: Rule1[Statement[Rdf]] = rule {
+        add //Bind | Add | Delete | Replace | Prefix
+      }
   
-      def WS: Rule0 = rule { oneOrMore(anyOf(" \t\r\n")) }
+      // Add ::= "Add" Subject Predicate Object '.'
+      def add: Rule1[Add[Rdf]] = rule {
+        "Add" ~ WS1 ~ SubjectR ~ WS1 ~ PredicateR ~ WS1 ~ ObjectR ~ WS0 ~ '.' ~> ((s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) => Add(s, p, o))
+      }
+
+      // Subject ::= iri | BlankNode | Var
+      def SubjectR: Rule1[Subject[Rdf]] = rule (
+          IRI ~> (PatchIRI(_))
+        | BlankNode ~> (PatchBNode(_))
+        | VarR
+      )
+
+      // Predicate ::= iri
+      def PredicateR: Rule1[Predicate[Rdf]] = rule (
+        IRI ~> (PatchIRI(_: Rdf#URI))
+      )
+
+      // Object ::= iri | BlankNode | RDFLiteral | Var
+      def ObjectR: Rule1[Objectt[Rdf]] = rule (
+          IRI ~> (PatchIRI(_))
+        | BlankNode ~> (PatchBNode(_))
+        | literal ~> (PatchLiteral(_))
+        | VarR
+      )
+
+      // iri ::= IRIREF | PrefixedName
+      def IRI: Rule1[Rdf#URI] = rule (
+        IRIREF | PrefixedName
+      )
+      
+      // BlankNode ::= BLANK_NODE_LABEL | ANON
+      def BlankNode: Rule1[Rdf#BNode] = rule (
+        BLANK_NODE_LABEL | ANON
+      )
+
+      // BLANK_NODE_LABEL ::= '_:' (PN_CHARS_U | [0-9]) ((PN_CHARS | '.')* PN_CHARS)?
+      def BLANK_NODE_LABEL: Rule1[Rdf#BNode] = rule (
+        "_:" ~ clearSB() ~ BLANK_NODE_LABEL1 ~ optional(BLANK_NODE_LABEL2) ~ push(BNode(sb.toString()))
+      )
+
+      // PN_CHARS_U | [0-9]
+      def BLANK_NODE_LABEL1: Rule0 = rule (
+          PN_CHARS_U
+        | Digit ~ appendSB()
+      )
+
+      // (PN_CHARS | '.')* PN_CHARS
+      def BLANK_NODE_LABEL2: Rule0 = rule (
+        oneOrMore(PN_CHARS) ~ test(lastChar != '.')
+      )
+
+      // ANON ::= '[' WS* ']'
+      def ANON: Rule1[Rdf#BNode] = rule (
+        '[' ~ WS0 ~ ']' ~ push(BNode())
+      )
+
+      // Literal ::= RDFLiteral | NumericLiteral | BooleanLiteral
+      def literal: Rule1[Rdf#Literal] = rule (
+        RDFLiteral | NumericLiteral | BooleanLiteral
+      )
+
+      // RDFLiteral ::= String (LANGTAG | '^^' iri)?
+      def RDFLiteral: Rule1[Rdf#Literal] = rule (
+        StringR ~ optional(LangOrIRI) ~> ((lexicalForm: String, opt: Option[Either[Rdf#Lang, Rdf#URI]]) => opt match {
+          case None                  => Literal(lexicalForm)
+          case Some(Left(langtag))   => Literal.tagged(lexicalForm, langtag)
+          case Some(Right(datatype)) => Literal(lexicalForm, datatype)
+        })
+      )
+
+      // just the (LANGTAG | '^^' iri) part
+      def LangOrIRI: Rule1[Either[Rdf#Lang, Rdf#URI]] = rule (
+          LANGTAG ~> ((lang: Rdf#Lang) => Left(lang))
+        | "^^" ~ IRI ~> ((datatype: Rdf#URI) => Right(datatype))
+      )
+
+      // NumericLiteral ::= INTEGER | DECIMAL | DOUBLE
+      def NumericLiteral: Rule1[Rdf#Literal] = rule (
+          DOUBLE ~> ((lexicalForm: String) => Literal(lexicalForm, xsd.double))
+        | DECIMAL ~> ((lexicalForm: String) => Literal(lexicalForm, xsd.decimal))
+        | INTEGER ~> ((lexicalForm: String) => Literal(lexicalForm, xsd.integer))
+      )
+
+      // INTEGER ::= [+-]? [0-9]+
+      def INTEGER: Rule1[String] = rule (
+        capture(optional(anyOf("+-")) ~ oneOrMore(CharPredicate.Digit))
+      )
+
+      // DECIMAL ::= [+-]? [0-9]* '.' [0-9]+
+      def DECIMAL: Rule1[String] = rule (
+        capture(optional(anyOf("+-")) ~ zeroOrMore(CharPredicate.Digit) ~ '.' ~ zeroOrMore(CharPredicate.Digit))
+      )
+
+      // DOUBLE ::= [+-]? ([0-9]+ '.' [0-9]* EXPONENT | '.' [0-9]+ EXPONENT | [0-9]+ EXPONENT)
+      def DOUBLE: Rule1[String] = rule (
+        capture(optional(anyOf("+-")) ~ (
+            oneOrMore(CharPredicate.Digit) ~ '.' ~ zeroOrMore(CharPredicate.Digit) ~ EXPONENT
+          | '.' ~ oneOrMore(CharPredicate.Digit) ~ EXPONENT
+          | oneOrMore(CharPredicate.Digit) ~ EXPONENT
+        ))
+      )
+
+      // EXPONENT ::= [eE] [+-]? [0-9]+
+      def EXPONENT: Rule0 = rule (
+        anyOf("eE") ~ optional(anyOf("+-")) ~ oneOrMore(CharPredicate.Digit)
+      )
+
+      // BooleanLiteral ::= 'true' | 'false'
+      def BooleanLiteral: Rule1[Rdf#Literal] = rule (
+          "true" ~ push(xsd.`true`)
+        | "false" ~ push(xsd.`false`)
+      )
+
+      // the VAR1 from SPARQL:   Var ::= '?' VARNAME
+      def VarR: Rule1[Var] = rule (
+        '?' ~ VARNAME
+      )
+
+      // VARNAME ::= ( PN_CHARS_U | [0-9] ) ( PN_CHARS_U | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040] )*
+      def VARNAME: Rule1[Var] = rule (
+        clearSB() ~ (PN_CHARS_U | CharPredicate.Digit ~ appendSB()) ~ zeroOrMore(
+            PN_CHARS_U
+          | (CharPredicate.Digit ++ CharPredicate('\u00B7') ++ between('\u0300', '\u036F') ++ between('\u203F', '\u2040')) ~ appendSB()
+        ) ~ push(Var(sb.toString))
+      )
+
+      // PrefixedName ::= PNAME_LN | PNAME_NS
+      def PrefixedName: Rule1[Rdf#URI] = rule (
+          PNAME_LN ~> ((prefix, localName) => URI(prefixes(prefix).getString + localName))
+        | PNAME_NS ~> (prefix => URI(prefix))
+      )
+
+      // PNAME_LN ::= PNAME_NS PN_LOCAL
+      def PNAME_LN: Rule2[String, String] = rule (
+        PNAME_NS ~ PN_LOCAL
+      )
+
+      // PN_LOCAL ::= (PN_CHARS_U | ':' | [0-9] | PLX) ((PN_CHARS | '.' | ':' | PLX)* (PN_CHARS | ':' | PLX))?
+      def PN_LOCAL: Rule1[String] = rule (
+        clearSB() ~ (PN_CHARS_U | (CharPredicate(':') ++ CharPredicate.Digit) ~ appendSB() | PLX) ~ optional(PN_LOCAL2) ~ push(sb.toString())
+      )
+
+      // (PN_CHARS | '.' | ':' | PLX)* (PN_CHARS | ':' | PLX)
+      // so basically (PN_CHARS | '.' | ':' | PLX)+ with no trailing '.'
+      def PN_LOCAL2: Rule0 = rule (
+        oneOrMore(PN_CHARS | anyOf(".:") ~ appendSB() | PLX) ~ test(lastChar != '.')
+      )
+
+      // PLX ::= PERCENT | PN_LOCAL_ESC
+      def PLX: Rule0 = rule (
+        PERCENT | PN_LOCAL_ESC
+      )
+
+      // PERCENT ::= '%' HEX HEX
+      // HEX ::= [0-9] | [A-F] | [a-f]
+      def PERCENT: Rule0 = rule (
+        '%' ~ appendSB() ~ CharPredicate.HexDigit ~ appendSB() ~ CharPredicate.HexDigit ~ appendSB()
+      )
+
+      // PN_LOCAL_ESC ::= '\' ('_' | '~' | '.' | '-' | '!' | '$' | '&' | "'" | '(' | ')' | '*' | '+' | ',' | ';' | '=' | '/' | '?' | '#' | '@' | '%')
+      def PN_LOCAL_ESC: Rule0 = rule (
+        '\\' ~ appendSB() ~ anyOf("_~.-!$&'()*+,;=/?#@%") ~ appendSB()
+      )
+      
+      // String ::= STRING_LITERAL_QUOTE | STRING_LITERAL_SINGLE_QUOTE | STRING_LITERAL_LONG_SINGLE_QUOTE | STRING_LITERAL_LONG_QUOTE
+      def StringR: Rule1[String] = rule (
+        STRING_LITERAL_QUOTE | STRING_LITERAL_SINGLE_QUOTE | STRING_LITERAL_LONG_SINGLE_QUOTE | STRING_LITERAL_LONG_QUOTE
+      )
+
+      // STRING_LITERAL_QUOTE ::= '"' ([^#x22#x5C#xA#xD] | ECHAR | UCHAR)* '"'      /* #x22=" #x5C=\ #xA=new line #xD=carriage return */
+      def STRING_LITERAL_QUOTE: Rule1[String] = rule (
+        '"' ~ clearSB() ~ zeroOrMore(ECHAR | UCHAR | noneOf("\"\\\n\r") ~ appendSB()) ~ '"' ~ push(sb.toString())
+      )
+
+      // STRING_LITERAL_SINGLE_QUOTE ::= "'" ([^#x27#x5C#xA#xD] | ECHAR | UCHAR)* "'"      /* #x27=' #x5C=\ #xA=new line #xD=carriage return */
+      def STRING_LITERAL_SINGLE_QUOTE: Rule1[String] = rule (
+        '\'' ~ clearSB() ~ zeroOrMore(ECHAR | UCHAR | noneOf("\"\\\n\r") ~ appendSB()) ~ '\'' ~ push(sb.toString())
+      )
+
+      // STRING_LITERAL_LONG_SINGLE_QUOTE ::= "'''" (("'" | "''")? ([^'\] | ECHAR | UCHAR))* "'''"
+      def STRING_LITERAL_LONG_SINGLE_QUOTE: Rule1[String] = rule (
+        "'''" ~ clearSB() ~ zeroOrMore(optional('\'' ~ appendSB() ~ optional('\'' ~ appendSB())) ~ (ECHAR | UCHAR | noneOf("'\\") ~ appendSB())) ~ "'''" ~ push(sb.toString())
+      )
+
+      // STRING_LITERAL_LONG_QUOTE ::= '"""' (('"' | '""')? ([^"\] | ECHAR | UCHAR))* '"""'
+      def STRING_LITERAL_LONG_QUOTE: Rule1[String] = rule (
+        "\"\"\"" ~ clearSB() ~ zeroOrMore(optional('"' ~ appendSB() ~ optional('"' ~ appendSB())) ~ (ECHAR | UCHAR | noneOf("\"\\") ~ appendSB())) ~ "\"\"\"" ~ push(sb.toString())
+      )
+
+      // ECHAR ::= '\' [tbnrf"'\]
+      def ECHAR: Rule0 = rule (
+        '\\' ~ (
+            't'  ~ appendSB('\t')
+          | 'b'  ~ appendSB('\b')
+          | 'n'  ~ appendSB('\n')
+          | 'r'  ~ appendSB('\r')
+          | 'f'  ~ appendSB('\f')
+          | '\'' ~ appendSB('\"')
+          | '\'' ~ appendSB('\'')
+          | '\\' ~ appendSB('\\')
+        )
+      )
+
+      // LANGTAG ::= '@' [a-zA-Z]+ ('-' [a-zA-Z0-9]+)*
+      def LANGTAG: Rule1[Rdf#Lang] = rule (
+        '@' ~ capture(oneOrMore(CharPredicate.Alpha) ~ zeroOrMore('-' ~ oneOrMore(CharPredicate.AlphaNum))) ~> ((langString: String) => Lang(langString))
+      )
+
+
+      def WS: Rule0 = rule { anyOf(" \t\r\n") }
+      def WS0: Rule0 = rule { zeroOrMore(WS) }
+      def WS1: Rule0 = rule { oneOrMore(WS) }
   
       // Prologue ::= Prefix*
       def Prologue: Rule1[Map[String, Rdf#URI]] = rule { push(this.prefixes) ~ zeroOrMore(Prefix ~> ((prefixes: Map[String, Rdf#URI], prefix) => push(prefixes + prefix))) }
   
       // Prefix ::= "Prefix" PNAME_NS IRIREF
       def Prefix: Rule1[(String, Rdf#URI)] = rule {
-        "Prefix" ~ WS ~ PNAME_NS ~ WS ~ IRIREF ~> ((qname: String, iri: Rdf#URI) => (qname, iri))
+        "Prefix" ~ WS1 ~ PNAME_NS ~ WS0 ~ IRIREF ~> ((qname: String, iri: Rdf#URI) => (qname, iri))
       }
   
       // PNAME_NS ::= PN_PREFIX? ':'

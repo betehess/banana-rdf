@@ -5,7 +5,7 @@ import org.scalatest._
 import java.io._
 import scala.util.{ Try, Success, Failure }
 
-abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) extends WordSpec with Matchers {
+abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) extends WordSpec with Matchers with TryValues {
 
   import ops._
 
@@ -29,21 +29,64 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
   def newParser(input: String) =
     new PEGPatchParser(input, baseURI = URI("http://example.com/foo#"), prefixes = Map("foaf" -> URI("http://xmlns.com/foaf/")))
 
-  "parse uri" in {
-    val parser = newParser("""<http://example.com/foo#\u2665>""")
-    parser.IRIREF.run() should be(Success(URI("http://example.com/foo#♥")))
-//    parser.parse(parser.qnameORuri, new StringReader("""<http://example.com>""")).get should be(URI("http://example.com"))
-//    parser.parse(parser.qnameORuri, new StringReader("""xsd:foo""")).get should be(xsd("foo"))
+  "parse IRIREF" in {
+    newParser("""<http://example.com/foo#\u2665>""").IRIREF.run().success.value should be(URI("http://example.com/foo#♥"))
+  }
+
+  "parse iri" in {
+    newParser("""<http://example.com/foo#\u2665>""").IRI.run().success.value should be(URI("http://example.com/foo#♥"))
+    newParser("""foaf:name""").IRI.run().success.value should be(URI("http://xmlns.com/foaf/name"))
   }
 
   "parse Prefix" in {
-    val parser = 
-    newParser("""Prefix example: <http://example.com/foo#>""").Prefix.run() should be(Success("example" -> URI("http://example.com/foo#")))
-//    println(newParser("example").PN_PREFIX.run())
-//    parser.parse(parser.qnameORuri, new StringReader("""<http://example.com>""")).get should be(URI("http://example.com"))
-//    parser.parse(parser.qnameORuri, new StringReader("""xsd:foo""")).get should be(xsd("foo"))
+    newParser("""Prefix example:<http://example.com/foo#>""").Prefix.run().success.value should be("example" -> URI("http://example.com/foo#"))
+    newParser("""Prefix   example: <http://example.com/foo#>""").Prefix.run().success.value should be("example" -> URI("http://example.com/foo#"))
+    newParser("""Prefix : <http://example.com/foo#>""").Prefix.run().success.value should be("" -> URI("http://example.com/foo#"))
   }
 
+  "parse BlankNode" in {
+    newParser("""_:foo""").BlankNode.run().success.value should be(BNode("foo"))
+    newParser("""[]""").BlankNode.run() shouldBe a [Success[_]]
+    newParser("""[ ]""").BlankNode.run() shouldBe a [Success[_]]
+  }
+
+  "parse RDFLiteral" in {
+    newParser(""""foo"""").RDFLiteral.run().success.value should be(Literal("foo"))
+    newParser(""""foo"@en""").RDFLiteral.run().success.value should be(Literal.tagged("foo", Lang("en")))
+    newParser(""""foo"^^foaf:name""").RDFLiteral.run().success.value should be(Literal("foo", URI("http://xmlns.com/foaf/name")))
+    newParser(""""foo"^^<http://xmlns.com/foaf/name>""").RDFLiteral.run().success.value should be(Literal("foo", URI("http://xmlns.com/foaf/name")))
+  }
+
+  "parse NumericLiteral" in {
+    newParser("""42""").NumericLiteral.run().success.value should be(Literal("42", xsd.integer))
+    newParser("""-42""").NumericLiteral.run().success.value should be(Literal("-42", xsd.integer))
+    newParser("""3.14""").NumericLiteral.run().success.value should be(Literal("3.14", xsd.decimal))
+    newParser("""-3.14""").NumericLiteral.run().success.value should be(Literal("-3.14", xsd.decimal))
+    newParser("""42e-10""").NumericLiteral.run().success.value should be(Literal("42e-10", xsd.double))
+    newParser("""-3.14E10""").NumericLiteral.run().success.value should be(Literal("-3.14E10", xsd.double))    
+  }
+
+  "parse BooleanLiteral" in {
+    newParser("""true""").BooleanLiteral.run().success.value should be(xsd.`true`)
+    newParser("""false""").BooleanLiteral.run().success.value should be(xsd.`false`)
+  }
+
+  "parse literal" in {
+    newParser(""""foo"^^foaf:name""").literal.run().success.value should be(Literal("foo", URI("http://xmlns.com/foaf/name")))
+    newParser("""-3.14""").literal.run().success.value should be(Literal("-3.14", xsd.decimal))
+    newParser("""true""").literal.run().success.value should be(xsd.`true`)
+  }
+
+  "parse Add" in {
+    newParser("""Add _:betehess foaf:name "Alexandre Bertails" .""").add.run().success.value should be(
+      Add(
+        PatchBNode(BNode("betehess")),
+        PatchIRI(URI("http://xmlns.com/foaf/name")),
+        PatchLiteral(Literal("Alexandre Bertails"))
+      )
+    )
+
+  }
 
 }
 
