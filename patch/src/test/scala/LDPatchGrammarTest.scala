@@ -77,12 +77,22 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
     newParser("""true""").literal.run().success.value should be(xsd.`true`)
   }
 
-  "parse Add" in {
+  "parse Add Object" in {
     newParser("""Add _:betehess foaf:name "Alexandre Bertails" .""").add.run().success.value should be(
       Add(
         PatchBNode(BNode("betehess")),
         PatchIRI(URI("http://xmlns.com/foaf/name")),
         PatchLiteral(Literal("Alexandre Bertails"))
+      )
+    )
+  }
+
+  "parse Add List" in {
+    newParser("""Add _:betehess foaf:name ( "Alexandre Bertails" "Betehess" ) .""").add.run().success.value should be(
+      AddList(
+        PatchBNode(BNode("betehess")),
+        PatchIRI(URI("http://xmlns.com/foaf/name")),
+        Seq(PatchLiteral(Literal("Alexandre Bertails")), PatchLiteral(Literal("Betehess")))
       )
     )
   }

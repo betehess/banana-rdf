@@ -7,7 +7,7 @@ import scala.language.reflectiveCalls
 sealed trait Statement[Rdf <: RDF]
 
 case class Add[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) extends Statement[Rdf]
-//    case class AddList(s: Subject, p: Predicate, list: Listt) extends Statement
+case class AddList[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], list: Seq[Objectt[Rdf]]) extends Statement[Rdf]
 case class Delete[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) extends Statement[Rdf]
 //    case class Replace(s: Subject, p: Predicate, slice: Slice, list: Listt) extends Statement
 //case class Bind[Rdf <: RDF]()
@@ -46,9 +46,20 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
         add | delete //Bind | Add | Delete | Replace | Prefix
       )
   
-      // Add ::= "Add" Subject Predicate Object '.'
-      def add: Rule1[Add[Rdf]] = rule (
-        "Add" ~ WS1 ~ SubjectR ~ WS1 ~ PredicateR ~ WS1 ~ ObjectR ~ WS0 ~ '.' ~> ((s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) => Add(s, p, o))
+      // Add ::= "Add" Subject Predicate ( Object | List ) '.'
+      def add: Rule1[Statement[Rdf]] = rule (
+        "Add" ~ WS1 ~ SubjectR ~ WS1 ~ PredicateR ~ WS1 ~ (
+            list ~> (Right(_))
+          | ObjectR ~> (Left(_))
+        ) ~ WS0 ~ '.' ~> ((s: Subject[Rdf], p: Predicate[Rdf], objectOrList: Either[Objectt[Rdf], Seq[Objectt[Rdf]]]) => objectOrList match {
+          case Left(o)     => Add(s, p, o)
+          case Right(list) => AddList(s, p, list)
+        })
+      )
+
+      // List ::= '(' Object* ')'
+      def list: Rule1[Seq[Objectt[Rdf]]] = rule (
+        '(' ~ WS0 ~ zeroOrMore(ObjectR).separatedBy(WS1) ~ WS0 ~ ')'
       )
 
       // Delete ::= "Delete" Subject Predicate Object '.'
