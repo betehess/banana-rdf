@@ -52,7 +52,7 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
 
       // Bind ::= "Bind" Var Value Path?
       def Bind: Rule1[m.Bind[Rdf]] = rule (
-        "Bind" ~ WS1 ~ Var ~ WS1 ~ Value ~ optional(WS1 ~ Path) ~> ((varr: m.Var, value: m.Value[Rdf], pathOpt: Option[m.LDPath[Rdf]]) => m.Bind(varr, value, pathOpt.getOrElse(m.LDPath(Seq.empty))))
+        "Bind" ~ WS1 ~ Var ~ WS1 ~ Value ~ optional(WS1 ~ Path) ~> ((varr: m.Var, value: m.Value[Rdf], pathOpt: Option[m.Path[Rdf]]) => m.Bind(varr, value, pathOpt.getOrElse(m.Path(Seq.empty))))
       )
 
       // Replace ::= "Replace" Subject Predicate Slice List
@@ -60,31 +60,28 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
         "Replace" ~ WS1 ~ Subject ~ WS1 ~ Predicate ~ WS1 ~ Slice ~ WS1 ~ List ~> ((s: m.Subject[Rdf], p: m.Predicate[Rdf], slice: m.Slice, list: Seq[m.Object[Rdf]]) => m.Replace(s, p, slice, list))
       )
 
-      // Path ::= ( Step | Constraint | UnicityConstraint )*
-      def Path: Rule1[m.LDPath[Rdf]] = rule (
-        zeroOrMore(Step | Constraint | UnicityConstraint) ~> ((pathElems: Seq[m.PathElement[Rdf]]) => m.LDPath(pathElems))
+      // Path ::= ( Step | Constraint )*
+      def Path: Rule1[m.Path[Rdf]] = rule (
+        zeroOrMore(Step | Constraint) ~> ((pathElems: Seq[m.PathElement[Rdf]]) => m.Path(pathElems))
       )
 
       // Step ::= '/' ( '-' iri | Index | iri )
-      def Step: Rule1[m.PathElement[Rdf]] = rule (
+      def Step: Rule1[m.Step[Rdf]] = rule (
         '/' ~ (
-            '-' ~ iri ~> ((uri: Rdf#URI) => m.Backward(m.PatchIRI(uri)))
-          | capture(oneOrMore(Digit)) ~> ((s: String) => m.Index(s.toInt))
-          | iri ~> ((uri: Rdf#URI) => m.Forward(m.PatchIRI(uri)))
+            '-' ~ iri ~> ((uri: Rdf#URI) => m.StepBackward(m.PatchIRI(uri)))
+          | capture(oneOrMore(Digit)) ~> ((s: String) => m.StepAt(s.toInt))
+          | iri ~> ((uri: Rdf#URI) => m.StepForward(m.PatchIRI(uri)))
         )
       )
 
-      // Constraint ::= '[' Path ( '=' Value )? ']'
+      // Constraint ::= '[' Path ( '=' Value )? ']' | '!'
       def Constraint: Rule1[m.Constraint[Rdf]] = rule (
-        '[' ~ Path ~ optional('=' ~ Value) ~ ']' ~> ((path: m.LDPath[Rdf], valueOpt: Option[m.Value[Rdf]]) => m.Constraint(path, valueOpt))
+          '[' ~ Path ~ optional('=' ~ Value) ~ ']' ~> ((path: m.Path[Rdf], valueOpt: Option[m.Value[Rdf]]) => m.Filter(path, valueOpt))
+        | '!' ~ push(m.UnicityConstraint)
       )
 
-      // UnicityConstraint ::= '!'
-      def UnicityConstraint: Rule1[m.UnicityConstraint.type] = rule (
-        ch('!') ~ push(m.UnicityConstraint)
-      )
       
-      // Slice ::= @@@
+      // Slice ::= 
       def Slice: Rule1[m.Slice] = ???
 
 

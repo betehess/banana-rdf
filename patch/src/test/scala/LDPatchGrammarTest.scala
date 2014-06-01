@@ -1,7 +1,7 @@
 package org.w3.banana.ldpatch
 
-import org.w3.banana.{ Delete => _, Var => _, _ }
-import org.scalatest._
+import org.w3.banana.{ Delete => _, _ }
+import org.scalatest.{ Filter => _, _ }
 import java.io._
 import scala.util.{ Try, Success, Failure }
 import org.w3.banana.ldpatch.model._
@@ -11,20 +11,6 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
   import ops._
 
   val ldpatch = LDPatch[Rdf]
-
-//  "parse variable" in {
-//    val parser = new PatchParserCombinator[Rdf]
-//    val v = parser.parse(parser.varr, new StringReader("?foo"))
-//    v.get should be (Var("foo"))
-//  }
-//
-//  "parse literal" in {
-//    val parser = new PatchParserCombinator[Rdf](prefixes = Map(xsd.prefixName -> xsd.prefixIri))
-//    parser.parse(parser.literal, new StringReader("4")).get should be(TypedLiteral("4", xsd.integer))
-//    parser.parse(parser.literal, new StringReader(""""foo"""")).get should be(TypedLiteral("foo", xsd.string))
-//    parser.parse(parser.literal, new StringReader(""""foo"^^xsd:string""")).get should be(TypedLiteral("foo", xsd.string))
-//
-//  }
 
   def newParser(input: String) =
     new ldpatch.grammar.PEGPatchParser(input, baseURI = URI("http://example.com/foo#"), prefixes = Map("foaf" -> URI("http://xmlns.com/foaf/")))
@@ -107,21 +93,21 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
     )
   }
 
-  "parse LDPath" in {
+  "parse Path" in {
     newParser("""/foaf:name/-foaf:name/<http://example.com/foo>""").Path.run().success.value should be(
-      LDPath(Seq(
-        Forward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
-        Backward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
-        Forward(PatchIRI(URI("http://example.com/foo")))
+      Path(Seq(
+        StepForward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+        StepBackward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+        StepForward(PatchIRI(URI("http://example.com/foo")))
       ))
     )
 
     newParser("""[/<http://example.com/foo>/foaf:name="Alexandre Bertails"]""").Path.run().success.value should be(
-      LDPath(Seq(
-        Constraint(
-          LDPath(Seq(
-            Forward(PatchIRI(URI("http://example.com/foo"))),
-            Forward(PatchIRI(URI("http://xmlns.com/foaf/name")))
+      Path(Seq(
+        Filter(
+          Path(Seq(
+            StepForward(PatchIRI(URI("http://example.com/foo"))),
+            StepForward(PatchIRI(URI("http://xmlns.com/foaf/name")))
           )),
           Some(PatchLiteral(Literal("Alexandre Bertails")))
         )
@@ -129,23 +115,23 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
     )
 
     newParser("""[/<http://example.com/foo>/-foaf:name]/foaf:friend""").Path.run().success.value should be(
-      LDPath(Seq(
-        Constraint(
-          LDPath(Seq(
-            Forward(PatchIRI(URI("http://example.com/foo"))),
-            Backward(PatchIRI(URI("http://xmlns.com/foaf/name")))
+      Path(Seq(
+        Filter(
+          Path(Seq(
+            StepForward(PatchIRI(URI("http://example.com/foo"))),
+            StepBackward(PatchIRI(URI("http://xmlns.com/foaf/name")))
           )),
           None
         ),
-        Forward(PatchIRI(URI("http://xmlns.com/foaf/friend")))
+        StepForward(PatchIRI(URI("http://xmlns.com/foaf/friend")))
       ))
     )
 
     newParser("""/foaf:name!/42""").Path.run().success.value should be(
-      LDPath(Seq(
-        Forward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+      Path(Seq(
+        StepForward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
         UnicityConstraint,
-        Index(42)
+        StepAt(42)
       ))
     )
 
@@ -158,7 +144,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
       Bind(
         Var("foo"),
         PatchIRI(URI("http://example.com/blah")),
-        LDPath(Seq())
+        Path(Seq())
       )
     )
 
@@ -166,10 +152,10 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
       Bind(
         Var("foo"),
         PatchIRI(URI("http://example.com/blah")),
-        LDPath(Seq(
-          Forward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
-          Backward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
-          Forward(PatchIRI(URI("http://example.com/foo")))
+        Path(Seq(
+          StepForward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+          StepBackward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+          StepForward(PatchIRI(URI("http://example.com/foo")))
         ))
       )
     )
