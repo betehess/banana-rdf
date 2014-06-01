@@ -107,6 +107,43 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
     )
   }
 
+  "parse LDPath" in {
+    newParser("""/foaf:name/-foaf:name/<http://example.com/foo>""").ldpath.run().success.value should be(
+      LDPath(Seq(
+        Forward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+        Backward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+        Forward(PatchIRI(URI("http://example.com/foo")))
+      ))
+    )
+
+    newParser("""[/<http://example.com/foo>/foaf:name="Alexandre Bertails"]""").ldpath.run().success.value should be(
+      LDPath(Seq(
+        Constraint(
+          LDPath(Seq(
+            Forward(PatchIRI(URI("http://example.com/foo"))),
+            Forward(PatchIRI(URI("http://xmlns.com/foaf/name")))
+          )),
+          Some(PatchLiteral(Literal("Alexandre Bertails")))
+        )
+      ))
+    )
+
+    newParser("""[/<http://example.com/foo>/-foaf:name]/foaf:friend""").ldpath.run().success.value should be(
+      LDPath(Seq(
+        Constraint(
+          LDPath(Seq(
+            Forward(PatchIRI(URI("http://example.com/foo"))),
+            Backward(PatchIRI(URI("http://xmlns.com/foaf/name")))
+          )),
+          None
+        ),
+        Forward(PatchIRI(URI("http://xmlns.com/foaf/friend")))
+      ))
+    )
+
+  }
+
+
 }
 
 import org.w3.banana.jena._

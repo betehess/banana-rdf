@@ -10,16 +10,25 @@ case class Add[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) 
 case class AddList[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], list: Seq[Objectt[Rdf]]) extends Statement[Rdf]
 case class Delete[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) extends Statement[Rdf]
 //    case class Replace(s: Subject, p: Predicate, slice: Slice, list: Listt) extends Statement
-//case class Bind[Rdf <: RDF]()
+case class Bind[Rdf <: RDF](varr: Var, startingNode: Value[Rdf], ldpath: LDPath[Rdf]) extends Statement[Rdf]
+
+case class LDPath[Rdf <: RDF](elements: Seq[PathElement[Rdf]])
+
+sealed trait PathElement[+Rdf <: RDF]
+case class Forward[Rdf <: RDF](predicate: Predicate[Rdf]) extends PathElement[Rdf]
+case class Backward[Rdf <: RDF](predicate: Predicate[Rdf]) extends PathElement[Rdf]
+case class Constraint[Rdf <: RDF](ldpath: LDPath[Rdf], valueOpt: Option[Value[Rdf]]) extends PathElement[Rdf]
+case class Index(i: Int) extends PathElement[Nothing]
 
 sealed trait Subject[+Rdf <: RDF]
 sealed trait Predicate[Rdf <: RDF]
 sealed trait Objectt[+Rdf <: RDF]
+sealed trait Value[+Rdf <: RDF]
 
-case class PatchIRI[Rdf <: RDF](uri: Rdf#URI) extends Subject[Rdf] with Predicate[Rdf] with Objectt[Rdf]
+case class PatchIRI[Rdf <: RDF](uri: Rdf#URI) extends Subject[Rdf] with Predicate[Rdf] with Objectt[Rdf] with Value[Rdf]
 case class PatchBNode[Rdf <: RDF](bnode: Rdf#BNode) extends Subject[Rdf] with Objectt[Rdf]
-case class PatchLiteral[Rdf <: RDF](literal: Rdf#Literal) extends Objectt[Rdf]
-case class Var(label: String) extends Subject[Nothing] with Objectt[Nothing]
+case class PatchLiteral[Rdf <: RDF](literal: Rdf#Literal) extends Objectt[Rdf] with Value[Rdf]
+case class Var(label: String) extends Subject[Nothing] with Objectt[Nothing] with Value[Nothing]
 
 object LDPatch {
   def apply[Rdf <: RDF](implicit ops: RDFOps[Rdf]): LDPatch[Rdf] = new LDPatch[Rdf]
@@ -67,6 +76,38 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
         "Delete" ~ WS1 ~ SubjectR ~ WS1 ~ PredicateR ~ WS1 ~ ObjectR ~ WS0 ~ '.' ~> ((s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) => Delete(s, p, o))
       )
 
+      // Bind ::= "Bind" Var Value LDPath? '.'
+      def bind: Rule1[Bind[Rdf]] = rule (
+        "Bind" ~ WS1 ~ VarR ~ WS1 ~ ValueR ~ optional(WS1 ~ ldpath) ~ WS0 ~ '.' ~> ((varr: Var, value: Value[Rdf], ldpathOpt: Option[LDPath[Rdf]]) => Bind(varr, value, ldpathOpt.getOrElse(LDPath(Seq.empty))))
+      )
+
+      // LDPath ::= PathElement*
+      def ldpath: Rule1[LDPath[Rdf]] = rule (
+        zeroOrMore(pathElement) ~> ((pathElems: Seq[PathElement[Rdf]]) => LDPath(pathElems))
+      )
+
+      // PathElement ::= Forward | Backward | Constraint | Index
+      def pathElement: Rule1[PathElement[Rdf]] = rule (
+        backward | forward | constraint | index
+      )
+
+      def forward: Rule1[Forward[Rdf]] = rule (
+        '/' ~ IRI ~> ((uri: Rdf#URI) => Forward(PatchIRI(uri)))
+      )
+
+      def backward: Rule1[Backward[Rdf]] = rule (
+        "/-" ~ IRI ~> ((uri: Rdf#URI) => Backward(PatchIRI(uri)))
+      )
+
+      def constraint: Rule1[Constraint[Rdf]] = rule (
+        '[' ~ ldpath ~ optional('=' ~ ValueR) ~ ']' ~> ((ldpath: LDPath[Rdf], valueOpt: Option[Value[Rdf]]) => Constraint(ldpath, valueOpt))
+      )
+
+      def index: Rule1[PathElement[Rdf]] = rule (
+        '/' ~ capture(oneOrMore(Digit)) ~> ((s: String) => Index(s.toInt))
+      )
+      
+
       // Subject ::= iri | BlankNode | Var
       def SubjectR: Rule1[Subject[Rdf]] = rule (
           IRI ~> (PatchIRI(_))
@@ -83,6 +124,13 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
       def ObjectR: Rule1[Objectt[Rdf]] = rule (
           IRI ~> (PatchIRI(_))
         | BlankNode ~> (PatchBNode(_))
+        | literal ~> (PatchLiteral(_))
+        | VarR
+      )
+
+      // Value ::= iri | RDFLiteral | Var
+      def ValueR: Rule1[Value[Rdf]] = rule (
+          IRI ~> (PatchIRI(_))
         | literal ~> (PatchLiteral(_))
         | VarR
       )
