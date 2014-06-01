@@ -69,9 +69,14 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
       def Step: Rule1[m.Step[Rdf]] = rule (
         '/' ~ (
             '-' ~ iri ~> ((uri: Rdf#URI) => m.StepBackward(m.PatchIRI(uri)))
-          | capture(oneOrMore(Digit)) ~> ((s: String) => m.StepAt(s.toInt))
+          | Index ~> (m.StepAt(_: Int))
           | iri ~> ((uri: Rdf#URI) => m.StepForward(m.PatchIRI(uri)))
         )
+      )
+
+      // Index ::= [0-9]+
+      def Index: Rule1[Int] = rule (
+        capture(oneOrMore(Digit)) ~> ((s: String) => s.toInt)
       )
 
       // Constraint ::= '[' Path ( '=' Value )? ']' | '!'
@@ -81,8 +86,15 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
       )
 
       
-      // Slice ::= 
-      def Slice: Rule1[m.Slice] = ???
+      // Slice ::= Index? '>' Index?
+      def Slice: Rule1[m.Slice] = rule (
+        optional(Index) ~ '>' ~ optional(Index) ~> ((leftOpt: Option[Int], rightOpt: Option[Int]) => (leftOpt, rightOpt) match {
+          case (Some(left), Some(right)) => m.Range(left, right)
+          case (Some(index), None)       => m.EverythingAfter(index)
+          case (None, Some(index))       => m.EverythingBefore(index)
+          case (None, None)              => m.End
+        })
+      )
 
 
       // Subject ::= iri | BlankNode | Var
