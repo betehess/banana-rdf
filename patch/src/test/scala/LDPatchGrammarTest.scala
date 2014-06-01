@@ -152,6 +152,30 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
   }
 
 
+  "parse Bind" in {
+
+    newParser("""Bind ?foo <http://example.com/blah> .""").bind.run().success.value should be(
+      Bind(
+        Var("foo"),
+        PatchIRI(URI("http://example.com/blah")),
+        LDPath(Seq())
+      )
+    )
+
+    newParser("""Bind ?foo <http://example.com/blah> /foaf:name/-foaf:name/<http://example.com/foo> .""").bind.run().success.value should be(
+      Bind(
+        Var("foo"),
+        PatchIRI(URI("http://example.com/blah")),
+        LDPath(Seq(
+          Forward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+          Backward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+          Forward(PatchIRI(URI("http://example.com/foo")))
+        ))
+      )
+    )
+
+  }
+
 }
 
 import org.w3.banana.jena._
