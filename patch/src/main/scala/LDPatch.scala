@@ -2,34 +2,7 @@ package org.w3.banana.ldpatch
 
 import org.w3.banana._
 import scala.util.Try
-import scala.language.reflectiveCalls
-
-sealed trait Statement[Rdf <: RDF]
-
-case class Add[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) extends Statement[Rdf]
-case class AddList[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], list: Seq[Objectt[Rdf]]) extends Statement[Rdf]
-case class Delete[Rdf <: RDF](s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) extends Statement[Rdf]
-//    case class Replace(s: Subject, p: Predicate, slice: Slice, list: Listt) extends Statement
-case class Bind[Rdf <: RDF](varr: Var, startingNode: Value[Rdf], ldpath: LDPath[Rdf]) extends Statement[Rdf]
-
-case class LDPath[Rdf <: RDF](elements: Seq[PathElement[Rdf]])
-
-sealed trait PathElement[+Rdf <: RDF]
-case class Forward[Rdf <: RDF](predicate: Predicate[Rdf]) extends PathElement[Rdf]
-case class Backward[Rdf <: RDF](predicate: Predicate[Rdf]) extends PathElement[Rdf]
-case class Constraint[Rdf <: RDF](ldpath: LDPath[Rdf], valueOpt: Option[Value[Rdf]]) extends PathElement[Rdf]
-case class Index(i: Int) extends PathElement[Nothing]
-case object UnicityConstraint extends PathElement[Nothing]
-
-sealed trait Subject[+Rdf <: RDF]
-sealed trait Predicate[Rdf <: RDF]
-sealed trait Objectt[+Rdf <: RDF]
-sealed trait Value[+Rdf <: RDF]
-
-case class PatchIRI[Rdf <: RDF](uri: Rdf#URI) extends Subject[Rdf] with Predicate[Rdf] with Objectt[Rdf] with Value[Rdf]
-case class PatchBNode[Rdf <: RDF](bnode: Rdf#BNode) extends Subject[Rdf] with Objectt[Rdf]
-case class PatchLiteral[Rdf <: RDF](literal: Rdf#Literal) extends Objectt[Rdf] with Value[Rdf]
-case class Var(label: String) extends Subject[Nothing] with Objectt[Nothing] with Value[Nothing]
+import org.w3.banana.ldpatch.{ model => m }
 
 object LDPatch {
   def apply[Rdf <: RDF](implicit ops: RDFOps[Rdf]): LDPatch[Rdf] = new LDPatch[Rdf]
@@ -47,101 +20,103 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
     class PEGPatchParser(val input: ParserInput, baseURI: Rdf#URI, var prefixes: Map[String, Rdf#URI] = Map.empty) extends Parser with StringBuilding {
 
       // LDPatch ::= Prologue Statement*
-      def LDPatch: Rule1[Seq[Statement[Rdf]]] = rule {
-        Prologue ~> (prefixes => this.prefixes = prefixes) ~ zeroOrMore(Statement) ~ EOI
+      def LDPatch: Rule1[Seq[m.Statement[Rdf]]] = rule {
+        Prologue ~> (prefixes => this.prefixes = prefixes) ~ WS1 ~ zeroOrMore(Statement).separatedBy(WS1) ~ EOI
       }
 
-      // Statement ::= Bind | Add | Delete | Replace | Prefix | Comment
-      def Statement: Rule1[Statement[Rdf]] = rule (
-        add | delete //Bind | Add | Delete | Replace | Prefix
+      // Statement ::= Bind | Add | Delete | Replace
+      def Statement: Rule1[m.Statement[Rdf]] = rule (
+        Bind | Add | Delete | Replace
       )
   
       // Add ::= "Add" Subject Predicate ( Object | List ) '.'
-      def add: Rule1[Statement[Rdf]] = rule (
-        "Add" ~ WS1 ~ SubjectR ~ WS1 ~ PredicateR ~ WS1 ~ (
-            list ~> (Right(_))
-          | ObjectR ~> (Left(_))
-        ) ~ WS0 ~ '.' ~> ((s: Subject[Rdf], p: Predicate[Rdf], objectOrList: Either[Objectt[Rdf], Seq[Objectt[Rdf]]]) => objectOrList match {
-          case Left(o)     => Add(s, p, o)
-          case Right(list) => AddList(s, p, list)
+      def Add: Rule1[m.Statement[Rdf]] = rule (
+        "Add" ~ WS1 ~ Subject ~ WS1 ~ Predicate ~ WS1 ~ (
+            List ~> (Right(_))
+          | Object ~> (Left(_))
+        ) ~> ((s: m.Subject[Rdf], p: m.Predicate[Rdf], objectOrList: Either[m.Object[Rdf], Seq[m.Object[Rdf]]]) => objectOrList match {
+          case Left(o)     => m.Add(s, p, o)
+          case Right(list) => m.AddList(s, p, list)
         })
       )
 
       // List ::= '(' Object* ')'
-      def list: Rule1[Seq[Objectt[Rdf]]] = rule (
-        '(' ~ WS0 ~ zeroOrMore(ObjectR).separatedBy(WS1) ~ WS0 ~ ')'
+      def List: Rule1[Seq[m.Object[Rdf]]] = rule (
+        '(' ~ WS0 ~ zeroOrMore(Object).separatedBy(WS1) ~ WS0 ~ ')'
       )
 
-      // Delete ::= "Delete" Subject Predicate Object '.'
-      def delete: Rule1[Delete[Rdf]] = rule (
-        "Delete" ~ WS1 ~ SubjectR ~ WS1 ~ PredicateR ~ WS1 ~ ObjectR ~ WS0 ~ '.' ~> ((s: Subject[Rdf], p: Predicate[Rdf], o: Objectt[Rdf]) => Delete(s, p, o))
+      // Delete ::= "Delete" Subject Predicate Object
+      def Delete: Rule1[m.Delete[Rdf]] = rule (
+        "Delete" ~ WS1 ~ Subject ~ WS1 ~ Predicate ~ WS1 ~ Object ~> ((s: m.Subject[Rdf], p: m.Predicate[Rdf], o: m.Object[Rdf]) => m.Delete(s, p, o))
       )
 
-      // Bind ::= "Bind" Var Value LDPath? '.'
-      def bind: Rule1[Bind[Rdf]] = rule (
-        "Bind" ~ WS1 ~ VarR ~ WS1 ~ ValueR ~ optional(WS1 ~ ldpath) ~ WS0 ~ '.' ~> ((varr: Var, value: Value[Rdf], ldpathOpt: Option[LDPath[Rdf]]) => Bind(varr, value, ldpathOpt.getOrElse(LDPath(Seq.empty))))
+      // Bind ::= "Bind" Var Value Path?
+      def Bind: Rule1[m.Bind[Rdf]] = rule (
+        "Bind" ~ WS1 ~ Var ~ WS1 ~ Value ~ optional(WS1 ~ Path) ~> ((varr: m.Var, value: m.Value[Rdf], pathOpt: Option[m.LDPath[Rdf]]) => m.Bind(varr, value, pathOpt.getOrElse(m.LDPath(Seq.empty))))
       )
 
-      // LDPath ::= PathElement*
-      def ldpath: Rule1[LDPath[Rdf]] = rule (
-        zeroOrMore(pathElement) ~> ((pathElems: Seq[PathElement[Rdf]]) => LDPath(pathElems))
+      // Replace ::= "Replace" Subject Predicate Slice List
+      def Replace: Rule1[m.Replace[Rdf]] = rule (
+        "Replace" ~ WS1 ~ Subject ~ WS1 ~ Predicate ~ WS1 ~ Slice ~ WS1 ~ List ~> ((s: m.Subject[Rdf], p: m.Predicate[Rdf], slice: m.Slice, list: Seq[m.Object[Rdf]]) => m.Replace(s, p, slice, list))
       )
 
-      // PathElement ::= Forward | Backward | Constraint | Index | UnicityConstraint
-      def pathElement: Rule1[PathElement[Rdf]] = rule (
-        unicityConstraint | backward | forward | constraint | index
+      // Path ::= ( Step | Constraint | UnicityConstraint )*
+      def Path: Rule1[m.LDPath[Rdf]] = rule (
+        zeroOrMore(Step | Constraint | UnicityConstraint) ~> ((pathElems: Seq[m.PathElement[Rdf]]) => m.LDPath(pathElems))
       )
 
-      def forward: Rule1[Forward[Rdf]] = rule (
-        '/' ~ IRI ~> ((uri: Rdf#URI) => Forward(PatchIRI(uri)))
+      // Step ::= '/' ( '-' iri | Index | iri )
+      def Step: Rule1[m.PathElement[Rdf]] = rule (
+        '/' ~ (
+            '-' ~ iri ~> ((uri: Rdf#URI) => m.Backward(m.PatchIRI(uri)))
+          | capture(oneOrMore(Digit)) ~> ((s: String) => m.Index(s.toInt))
+          | iri ~> ((uri: Rdf#URI) => m.Forward(m.PatchIRI(uri)))
+        )
       )
 
-      def backward: Rule1[Backward[Rdf]] = rule (
-        "/-" ~ IRI ~> ((uri: Rdf#URI) => Backward(PatchIRI(uri)))
+      // Constraint ::= '[' Path ( '=' Value )? ']'
+      def Constraint: Rule1[m.Constraint[Rdf]] = rule (
+        '[' ~ Path ~ optional('=' ~ Value) ~ ']' ~> ((path: m.LDPath[Rdf], valueOpt: Option[m.Value[Rdf]]) => m.Constraint(path, valueOpt))
       )
 
-      def constraint: Rule1[Constraint[Rdf]] = rule (
-        '[' ~ ldpath ~ optional('=' ~ ValueR) ~ ']' ~> ((ldpath: LDPath[Rdf], valueOpt: Option[Value[Rdf]]) => Constraint(ldpath, valueOpt))
-      )
-
-      def index: Rule1[PathElement[Rdf]] = rule (
-        '/' ~ capture(oneOrMore(Digit)) ~> ((s: String) => Index(s.toInt))
-      )
-
-      def unicityConstraint: Rule1[UnicityConstraint.type] = rule (
-        ch('!') ~ push(UnicityConstraint)
+      // UnicityConstraint ::= '!'
+      def UnicityConstraint: Rule1[m.UnicityConstraint.type] = rule (
+        ch('!') ~ push(m.UnicityConstraint)
       )
       
+      // Slice ::= @@@
+      def Slice: Rule1[m.Slice] = ???
+
 
       // Subject ::= iri | BlankNode | Var
-      def SubjectR: Rule1[Subject[Rdf]] = rule (
-          IRI ~> (PatchIRI(_))
-        | BlankNode ~> (PatchBNode(_))
-        | VarR
+      def Subject: Rule1[m.Subject[Rdf]] = rule (
+          iri ~> (m.PatchIRI(_))
+        | BlankNode ~> (m.PatchBNode(_))
+        | Var
       )
 
       // Predicate ::= iri
-      def PredicateR: Rule1[Predicate[Rdf]] = rule (
-        IRI ~> (PatchIRI(_: Rdf#URI))
+      def Predicate: Rule1[m.Predicate[Rdf]] = rule (
+        iri ~> (m.PatchIRI(_: Rdf#URI))
       )
 
-      // Object ::= iri | BlankNode | RDFLiteral | Var
-      def ObjectR: Rule1[Objectt[Rdf]] = rule (
-          IRI ~> (PatchIRI(_))
-        | BlankNode ~> (PatchBNode(_))
-        | literal ~> (PatchLiteral(_))
-        | VarR
+      // Object ::= iri | BlankNode | literal | Var
+      def Object: Rule1[m.Object[Rdf]] = rule (
+          iri ~> (m.PatchIRI(_))
+        | BlankNode ~> (m.PatchBNode(_))
+        | literal ~> (m.PatchLiteral(_))
+        | Var
       )
 
-      // Value ::= iri | RDFLiteral | Var
-      def ValueR: Rule1[Value[Rdf]] = rule (
-          IRI ~> (PatchIRI(_))
-        | literal ~> (PatchLiteral(_))
-        | VarR
+      // Value ::= iri | literal | Var
+      def Value: Rule1[m.Value[Rdf]] = rule (
+          iri ~> (m.PatchIRI(_))
+        | literal ~> (m.PatchLiteral(_))
+        | Var
       )
 
       // iri ::= IRIREF | PrefixedName
-      def IRI: Rule1[Rdf#URI] = rule (
+      def iri: Rule1[Rdf#URI] = rule (
         IRIREF | PrefixedName
       )
       
@@ -188,7 +163,7 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
       // just the (LANGTAG | '^^' iri) part
       def LangOrIRI: Rule1[Either[Rdf#Lang, Rdf#URI]] = rule (
           LANGTAG ~> ((lang: Rdf#Lang) => Left(lang))
-        | "^^" ~ IRI ~> ((datatype: Rdf#URI) => Right(datatype))
+        | "^^" ~ iri ~> ((datatype: Rdf#URI) => Right(datatype))
       )
 
       // NumericLiteral ::= INTEGER | DECIMAL | DOUBLE
@@ -229,16 +204,16 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
       )
 
       // the VAR1 from SPARQL:   Var ::= '?' VARNAME
-      def VarR: Rule1[Var] = rule (
+      def Var: Rule1[m.Var] = rule (
         '?' ~ VARNAME
       )
 
       // VARNAME ::= ( PN_CHARS_U | [0-9] ) ( PN_CHARS_U | [0-9] | #x00B7 | [#x0300-#x036F] | [#x203F-#x2040] )*
-      def VARNAME: Rule1[Var] = rule (
+      def VARNAME: Rule1[m.Var] = rule (
         clearSB() ~ (PN_CHARS_U | CharPredicate.Digit ~ appendSB()) ~ zeroOrMore(
             PN_CHARS_U
           | (CharPredicate.Digit ++ CharPredicate('\u00B7') ++ between('\u0300', '\u036F') ++ between('\u203F', '\u2040')) ~ appendSB()
-        ) ~ push(Var(sb.toString))
+        ) ~ push(m.Var(sb.toString))
       )
 
       // PrefixedName ::= PNAME_LN | PNAME_NS

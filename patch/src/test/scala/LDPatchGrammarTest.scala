@@ -1,16 +1,16 @@
 package org.w3.banana.ldpatch
 
-import org.w3.banana._
+import org.w3.banana.{ Delete => _, Var => _, _ }
 import org.scalatest._
 import java.io._
 import scala.util.{ Try, Success, Failure }
+import org.w3.banana.ldpatch.model._
 
 abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) extends WordSpec with Matchers with TryValues {
 
   import ops._
 
   val ldpatch = LDPatch[Rdf]
-  import ldpatch.grammar._
 
 //  "parse variable" in {
 //    val parser = new PatchParserCombinator[Rdf]
@@ -27,15 +27,15 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
 //  }
 
   def newParser(input: String) =
-    new PEGPatchParser(input, baseURI = URI("http://example.com/foo#"), prefixes = Map("foaf" -> URI("http://xmlns.com/foaf/")))
+    new ldpatch.grammar.PEGPatchParser(input, baseURI = URI("http://example.com/foo#"), prefixes = Map("foaf" -> URI("http://xmlns.com/foaf/")))
 
   "parse IRIREF" in {
     newParser("""<http://example.com/foo#\u2665>""").IRIREF.run().success.value should be(URI("http://example.com/foo#♥"))
   }
 
   "parse iri" in {
-    newParser("""<http://example.com/foo#\u2665>""").IRI.run().success.value should be(URI("http://example.com/foo#♥"))
-    newParser("""foaf:name""").IRI.run().success.value should be(URI("http://xmlns.com/foaf/name"))
+    newParser("""<http://example.com/foo#\u2665>""").iri.run().success.value should be(URI("http://example.com/foo#♥"))
+    newParser("""foaf:name""").iri.run().success.value should be(URI("http://xmlns.com/foaf/name"))
   }
 
   "parse Prefix" in {
@@ -78,7 +78,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
   }
 
   "parse Add Object" in {
-    newParser("""Add _:betehess foaf:name "Alexandre Bertails" .""").add.run().success.value should be(
+    newParser("""Add _:betehess foaf:name "Alexandre Bertails"""").Add.run().success.value should be(
       Add(
         PatchBNode(BNode("betehess")),
         PatchIRI(URI("http://xmlns.com/foaf/name")),
@@ -88,7 +88,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
   }
 
   "parse Add List" in {
-    newParser("""Add _:betehess foaf:name ( "Alexandre Bertails" "Betehess" ) .""").add.run().success.value should be(
+    newParser("""Add _:betehess foaf:name ( "Alexandre Bertails" "Betehess" )""").Add.run().success.value should be(
       AddList(
         PatchBNode(BNode("betehess")),
         PatchIRI(URI("http://xmlns.com/foaf/name")),
@@ -98,7 +98,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
   }
 
   "parse Delete" in {
-    newParser("""Delete ?betehess foaf:name "Alexandre Bertails" .""").delete.run().success.value should be(
+    newParser("""Delete ?betehess foaf:name "Alexandre Bertails"""").Delete.run().success.value should be(
       Delete(
         Var("betehess"),
         PatchIRI(URI("http://xmlns.com/foaf/name")),
@@ -108,7 +108,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
   }
 
   "parse LDPath" in {
-    newParser("""/foaf:name/-foaf:name/<http://example.com/foo>""").ldpath.run().success.value should be(
+    newParser("""/foaf:name/-foaf:name/<http://example.com/foo>""").Path.run().success.value should be(
       LDPath(Seq(
         Forward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
         Backward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
@@ -116,7 +116,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
       ))
     )
 
-    newParser("""[/<http://example.com/foo>/foaf:name="Alexandre Bertails"]""").ldpath.run().success.value should be(
+    newParser("""[/<http://example.com/foo>/foaf:name="Alexandre Bertails"]""").Path.run().success.value should be(
       LDPath(Seq(
         Constraint(
           LDPath(Seq(
@@ -128,7 +128,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
       ))
     )
 
-    newParser("""[/<http://example.com/foo>/-foaf:name]/foaf:friend""").ldpath.run().success.value should be(
+    newParser("""[/<http://example.com/foo>/-foaf:name]/foaf:friend""").Path.run().success.value should be(
       LDPath(Seq(
         Constraint(
           LDPath(Seq(
@@ -141,7 +141,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
       ))
     )
 
-    newParser("""/foaf:name!/42""").ldpath.run().success.value should be(
+    newParser("""/foaf:name!/42""").Path.run().success.value should be(
       LDPath(Seq(
         Forward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
         UnicityConstraint,
@@ -154,7 +154,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
 
   "parse Bind" in {
 
-    newParser("""Bind ?foo <http://example.com/blah> .""").bind.run().success.value should be(
+    newParser("""Bind ?foo <http://example.com/blah>""").Bind.run().success.value should be(
       Bind(
         Var("foo"),
         PatchIRI(URI("http://example.com/blah")),
@@ -162,7 +162,7 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
       )
     )
 
-    newParser("""Bind ?foo <http://example.com/blah> /foaf:name/-foaf:name/<http://example.com/foo> .""").bind.run().success.value should be(
+    newParser("""Bind ?foo <http://example.com/blah> /foaf:name/-foaf:name/<http://example.com/foo>""").Bind.run().success.value should be(
       Bind(
         Var("foo"),
         PatchIRI(URI("http://example.com/blah")),
