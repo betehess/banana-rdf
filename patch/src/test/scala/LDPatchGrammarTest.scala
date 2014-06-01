@@ -141,6 +141,14 @@ abstract class LDPatchGrammarTest[Rdf <: RDF]()(implicit ops: RDFOps[Rdf]) exten
       ))
     )
 
+    newParser("""/foaf:name!/42""").ldpath.run().success.value should be(
+      LDPath(Seq(
+        Forward(PatchIRI(URI("http://xmlns.com/foaf/name"))),
+        UnicityConstraint,
+        Index(42)
+      ))
+    )
+
   }
 
 

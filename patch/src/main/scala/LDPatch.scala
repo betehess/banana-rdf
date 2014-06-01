@@ -19,6 +19,7 @@ case class Forward[Rdf <: RDF](predicate: Predicate[Rdf]) extends PathElement[Rd
 case class Backward[Rdf <: RDF](predicate: Predicate[Rdf]) extends PathElement[Rdf]
 case class Constraint[Rdf <: RDF](ldpath: LDPath[Rdf], valueOpt: Option[Value[Rdf]]) extends PathElement[Rdf]
 case class Index(i: Int) extends PathElement[Nothing]
+case object UnicityConstraint extends PathElement[Nothing]
 
 sealed trait Subject[+Rdf <: RDF]
 sealed trait Predicate[Rdf <: RDF]
@@ -86,9 +87,9 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
         zeroOrMore(pathElement) ~> ((pathElems: Seq[PathElement[Rdf]]) => LDPath(pathElems))
       )
 
-      // PathElement ::= Forward | Backward | Constraint | Index
+      // PathElement ::= Forward | Backward | Constraint | Index | UnicityConstraint
       def pathElement: Rule1[PathElement[Rdf]] = rule (
-        backward | forward | constraint | index
+        unicityConstraint | backward | forward | constraint | index
       )
 
       def forward: Rule1[Forward[Rdf]] = rule (
@@ -105,6 +106,10 @@ class LDPatch[Rdf <: RDF](implicit val ops: RDFOps[Rdf]) {
 
       def index: Rule1[PathElement[Rdf]] = rule (
         '/' ~ capture(oneOrMore(Digit)) ~> ((s: String) => Index(s.toInt))
+      )
+
+      def unicityConstraint: Rule1[UnicityConstraint.type] = rule (
+        ch('!') ~ push(UnicityConstraint)
       )
       
 
