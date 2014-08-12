@@ -245,6 +245,85 @@ _:x <a> _:z.
   }
 
 
+  "test9" in {
+    val graph = parseGraph("""
+<alice> <knows>
+     [ <first> "Bob"; <last> "Smith" ],
+     [ <first> "Bob"; <last> "Jones" ],
+     [ <first> "Charlie"; <last> "Smith" ],
+     [ <first> "Charlie"; <last> "Jones" ].
+""")
+    val expectedGraph = parseGraph("""
+<alice> <knows>
+     [ <first> "Bob"; <last> "Smith" ],
+     [ <first> "Bob"; <last> "Jones" ],
+     [ <first> "Charlie"; <last> "Smith" ],
+     [ <first> "Chuck"; <last> "Jones" ].
+""")
+    // this requires to multiple filters
+    val ldpatch = parseLDPatch("""
+B ?x "Charlie" /-<first>[/<last> = "Jones"] .
+D ?x <first> "Charlie" .
+A ?x <first> "Chuck" .
+""")
+    applyLDPatch(ldpatch, graph).isIsomorphicWith(expectedGraph) should be (true)
+  }
+
+
+  "test10" in {
+    val graph = parseGraph("""
+<alice> <knows>
+     [ <first> [ <text> "Bob"]; <last> [ <text> "Smith"] ],
+     [ <first> [ <text> "Bob"]; <last> [ <text> "Jones"] ],
+     [ <first> [ <text> "Charlie"]; <last> [ <text> "Smith"] ],
+     [ <first> [ <text> "Charlie"]; <last> [ <text> "Jones"] ].
+""")
+    val expectedGraph = parseGraph("""
+<alice> <knows>
+     [ <first> [ <text> "Bob"]; <last> [ <text> "Smith"] ],
+     [ <first> [ <text> "Bob"]; <last> [ <text> "Jones"] ],
+     [ <first> [ <text> "Charlie"]; <last> [ <text> "Smith"] ],
+     [ <first> [ <text> "Chuck"]; <last> [ <text> "Jones"] ].
+""")
+    val ldpatch = parseLDPatch("""
+B ?x "Charlie" /-<text> [ /-<first> /<last> /<text> = "Jones"] .
+D ?x <text> "Charlie" .
+A ?x <text> "Chuck" .
+""")
+    applyLDPatch(ldpatch, graph).isIsomorphicWith(expectedGraph) should be (true)
+  }
+
+
+  "test11" in {
+    val graph = parseGraph("""
+<alice> <knows>
+     [ <first> "Bob"; <middle> "A"; <last> "Smith" ],
+     [ <first> "Bob"; <middle> "B"; <last> "Smith" ],
+     [ <first> "Bob"; <middle> "A"; <last> "Jones" ],
+     [ <first> "Bob"; <middle> "B"; <last> "Jones" ],
+     [ <first> "Charlie"; <middle> "A"; <last> "Smith" ],
+     [ <first> "Charlie"; <middle> "B"; <last> "Smith" ].
+""")
+    val expectedGraph = parseGraph("""
+<alice> <knows>
+     [ <first> "Bob"; <middle> "A"; <last> "Smith" ],
+     [ <first> "Bob"; <middle> "B"; <last> "Smith" ],
+     [ <first> "Chuck"; <middle> "A"; <last> "Jones" ],
+     [ <first> "Bob"; <middle> "B"; <last> "Jones" ],
+     [ <first> "Charlie"; <middle> "A"; <last> "Smith" ],
+     [ <first> "Charlie"; <middle> "B"; <last> "Smith" ].
+""")
+    // Sandro's first Bind :-)
+    val ldpatch = parseLDPatch("""
+Bind ?BobASmith <alice> /<knows>[/<first> = "Bob"][/<middle> = "A"][/<last> = "Jones"]! .
+D ?BobASmith <first> "Bob" .
+A ?BobASmith <first> "Chuck" .
+""")
+    applyLDPatch(ldpatch, graph).isIsomorphicWith(expectedGraph) should be (true)
+  }
+
+
+
 }
 
 import org.w3.banana.jena._
