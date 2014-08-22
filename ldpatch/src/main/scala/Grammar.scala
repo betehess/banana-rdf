@@ -3,6 +3,7 @@ package org.w3.banana.ldpatch
 import org.w3.banana._
 import scala.util.Try
 import org.w3.banana.ldpatch.{ model => m }
+import scala.util.{ Try, Success, Failure }
 
 trait Grammar[Rdf <: RDF] {
 
@@ -16,6 +17,15 @@ trait Grammar[Rdf <: RDF] {
     import CharPredicate._
 
     def between(low: Char, high: Char): CharPredicate = CharPredicate.from(c => c >= low && c <= high)
+
+    def parseLDPatch(input: ParserInput, baseURI: Rdf#URI): Try[m.LDPatch[Rdf]] = {
+      val parser = new PEGPatchParser(input, baseURI, prefixes = Map.empty)
+      parser.LDPatch.run() match {
+        case success @ Success(_) => success
+        case Failure(error: ParseError) => Failure(new RuntimeException(parser.formatError(error)))
+        case failure @ Failure(_) => failure
+      }
+    }
 
     class PEGPatchParser(
       val input: ParserInput,
@@ -44,7 +54,7 @@ trait Grammar[Rdf <: RDF] {
 
       // LDPatch ::= Prologue Statement*
       def LDPatch: Rule1[m.LDPatch[Rdf]] = rule {
-        WS0 ~ Prologue ~> (prefixes => this.prefixes = prefixes) ~ WS1 ~ zeroOrMore(Statement).separatedBy(WS1) ~ WS0 ~ EOI ~> ((statements: Seq[m.Statement[Rdf]]) => m.LDPatch(statements))
+        WS0 ~ optional(Prologue ~> (prefixes => this.prefixes = prefixes) ~ WS1) ~ zeroOrMore(Statement).separatedBy(WS1) ~ WS0 ~ EOI ~> ((statements: Seq[m.Statement[Rdf]]) => m.LDPatch(statements))
       }
 
       // Prologue ::= prefixID*
